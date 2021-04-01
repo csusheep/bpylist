@@ -1,6 +1,7 @@
 from bpylist import bplist
 from bpylist.archive_types import timestamp, uid
 from typing import Mapping
+from collections import OrderedDict
 
 # The magic number which Cocoa uses as an implementation version.
 # I don' think there were 99_999 previous implementations, I think
@@ -103,7 +104,19 @@ class DictArchive:
 
         return d
 
+class MutableStringArchive:
+    "Delegate for packing/unpacking NSMutableString objects"
 
+    def decode_archive(archive):
+        s = archive.decode('NS.string')
+        return s
+
+class MutableDataArchive:
+    "Delegate for packing/unpacking NSMutableData objects"
+
+    def decode_archive(archive):
+        s = archive.decode('NS.data')
+        return s
 class ListArchive:
     "Delegate for packing/unpacking NS(Mutable)Array objects"
 
@@ -119,7 +132,32 @@ class SetArchive:
         uids = archive.decode('NS.objects')
         return set([archive._decode_index(index) for index in uids])
 
+class NullArchive:
+    
+    def decode_archive(archive):
+        return None
 
+class TODOArchive:
+    
+    def decode_archive(archive):
+        return ""
+
+class ErrorArchive:
+    
+    def decode_archive(archive):
+        domain = archive.decode('NSDomain')
+        userinfo = archive.decode('NSUserInfo')
+        code = archive.decode('NSCode')
+        return {"$class": "NSError", "domain": domain, "userinfo": userinfo, "code": code}
+
+class ExceptionArchive:
+
+    def decode_archive(archive):
+        name = archive.decode('NS.name')
+        reason = archive.decode('NS.reason')
+        userinfo = archive.decode('userinfo')
+        return {"$class": "NSException", "reason": reason, "userinfo": userinfo, "name": name}
+        
 class ArchivedObject:
     """
     Stateful wrapper around Unarchive for an archived object.
@@ -221,7 +259,7 @@ class Unarchive:
         # special way of saying the value is null/nil/none
         if index == 0:
             return None
-
+        #print("decode index:", index)
         obj = self.unpacked_uids.get(index)
         if obj == CycleToken:
             raise CircularReference(index)
@@ -230,13 +268,14 @@ class Unarchive:
             return obj
 
         raw_obj = self.objects[index]
-
+        #print(raw_obj)
         # put a temp object in place, in case we have a circular
         # reference, which we do not really support
         self.unpacked_uids[index] = CycleToken
 
         # if obj is a (semi-)primitive type (e.g. str)
         if not isinstance(raw_obj, dict):
+            self.unpacked_uids[index] = raw_obj
             return raw_obj
 
         class_uid = raw_obj.get('$class')
@@ -422,8 +461,12 @@ class Archive:
               '$objects': self.objects,
               '$top': { 'root': uid(1) }
                   }
-
-        return bplist.generate(d)
+        d2 = OrderedDict()
+        d2['$version'] = d['$version']
+        d2['$archiver'] = d['$archiver']
+        d2['$top'] = d['$top']
+        d2['$objects'] = d['$objects']
+        return bplist.generate(d2)
 
 
 UNARCHIVE_CLASS_MAP = {
@@ -433,7 +476,13 @@ UNARCHIVE_CLASS_MAP = {
     'NSMutableArray':      ListArchive,
     'NSSet':               SetArchive,
     'NSMutableSet':        SetArchive,
-    'NSDate':              timestamp
+    'NSDate':              timestamp,
+    'NSNull':              NullArchive,
+    'NSError':             ErrorArchive,
+    'NSException':         ExceptionArchive,
+    'NSMutableString':     MutableStringArchive,
+    'DTSysmonTapMessage':  TODOArchive,
+    'NSMutableData':       MutableDataArchive,
     }
 
 
